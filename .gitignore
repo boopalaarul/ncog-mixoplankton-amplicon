@@ -4,3 +4,4 @@ input_data_files
 .ipynb_checkpoints     
 old_notebooks_2024-05 
 old_notebooks_2024-10
+__pycache__/*
