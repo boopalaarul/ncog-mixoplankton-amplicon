@@ -1,0 +1,228 @@
+---
+title: "NCOG (18Sv4,v9) Amplicon Proportion (Beta, Dirichlet) Regression"
+author: "Boopalakrishnan Arul"
+date: "2025-01-09"
+output: html_document
+---
+
+```{r load.libraries}
+library(betareg)
+library(ggplot2)
+library(patchwork)
+```
+
+## R Markdown
+
+This is an R Markdown document. Markdown is a simple formatting syntax for authoring HTML, PDF, and MS Word documents. For more details on using R Markdown see <http://rmarkdown.rstudio.com>.
+
+When you click the **Knit** button a document will be generated that includes both content as well as the output of any embedded R code chunks within the document. You can embed an R code chunk like this:
+
+```{r load.data}
+asv.proportions.18Sv4 <- read.csv2("01_out_asv_proportions_18Sv4.tsv", 
+                                   sep = "\t",
+                                   row.names = 1, dec = ".")
+asv.proportions.18Sv9 <- read.csv2("01_out_asv_proportions_18Sv9.tsv", 
+                                   sep = "\t",
+                                   row.names = 1, dec = ".")
+asv.taxo.mft.18Sv4 <- read.csv2("01_out_asv_taxo_mft_18Sv4.tsv", 
+                                   sep = "\t",
+                                   row.names = 1)
+asv.taxo.mft.18Sv9 <- read.csv2("01_out_asv_taxo_mft_18Sv9.tsv", 
+                                   sep = "\t",
+                                   row.names = 1)
+env.features.18Sv4 <- read.csv2("01_out_env_features_18Sv4.tsv", 
+                                   sep = "\t",
+                                   row.names = 1, dec = ".")
+env.features.18Sv9 <- read.csv2("01_out_env_features_18Sv9.tsv", 
+                                   sep = "\t",
+                                   row.names = 1, dec = ".")
+gc() #clears old tables if loaded
+```
+
+## Including Plots
+
+You can also embed plots, for example:
+
+```{r calculate.cm.props}
+#asv.proportions.18Sv4[
+CM.select.18Sv4 <- asv.taxo.mft.18Sv4[rownames(asv.proportions.18Sv4), "MFT"] == "CM"
+CM.select.18Sv9 <- asv.taxo.mft.18Sv9[rownames(asv.proportions.18Sv9), "MFT"] == "CM"
+
+#samples are columns, need column sums
+#cm.proportions.18Sv4 <- colSums(asv.proportions.18Sv4[CM.select.18Sv4,])
+cm.proportions.18Sv4 <- apply(asv.proportions.18Sv4[CM.select.18Sv4,], 
+                              MARGIN = 2, FUN = sum)
+sum(cm.proportions.18Sv4 == 0)
+cm.proportions.18Sv9 <- apply(asv.proportions.18Sv9[CM.select.18Sv9,], 
+                              MARGIN = 2, FUN = sum)
+sum(cm.proportions.18Sv9 == 0)
+#names(cm.proportions.18Sv4)
+```
+Regression against each variable, compare AIC / plots -> multiple regression over best predictors, or ANOVA over segmented predictor space?
+
+1. start w/ plots and summaries.
+```{r list.variables}
+apply(env.features.18Sv4, 2, class)
+```
+
+```{r plot.env.CM}
+#p1 <- ggplot() + 
+#  geom_point(aes(x = env.features.18Sv4$Lat_Dec, y = cm.proportions.18Sv4))
+generate.plots <- function (env.features, cm.proportions) {
+  ggplot.object <- ggplot(env.features)
+  
+  p.lat <- ggplot.object +
+    geom_point(aes(x = Lat_Dec, y = cm.proportions))
+  
+  p.lon <- ggplot.object + 
+    geom_point(aes(x = Lon_Dec, y = cm.proportions))
+  
+  p.bdepth <- ggplot.object +
+    geom_point(aes(x = Bottle_Depth, y = cm.proportions))
+  
+  p.temp <- ggplot.object +
+    geom_point(aes(x = T_degC, y = cm.proportions))
+  
+  p.sal <- ggplot.object +
+    geom_point(aes(x = Salnty, y = cm.proportions))
+  
+  #should have a dissolved nitrogen column
+  p.din <- ggplot.object +
+    geom_point(aes(x = NH3ug, y = cm.proportions), colour="red", size = 1) +
+    geom_point(aes(x = NO3ug, y = cm.proportions), size = .5)
+
+  #requires library(patchwork)  
+  p.lat + p.lon + p.bdepth + p.temp + p.sal + p.din + plot_layout(ncol = 2)
+}
+```
+
+```{r plot.18Sv4}
+generate.plots(env.features.18Sv4, cm.proportions.18Sv4)
+```
+
+```{r plot.18Sv9}
+generate.plots(env.features.18Sv9, cm.proportions.18Sv9)
+```
+
+run betareg with the mu-k characterization, might actually be able to graph mu
+as predicted for each point... no wait, this isn't poisson regression. there isn't a 
+separate distribution predicted for each point. g(alpha_q)=X times b, b is the whole vector and X includes all observations (might be a feature subset at most).
+
+domain of beta function is probabilities, mu is the modal probability of a distribution with some shape params alpha, beta. probably best to graph mu as a function of x (mu has same domain as y axis.)
+
+```{r null.beta}
+precision <- function(mu, var) {
+  return(
+    mu * (((mu * (1-mu)) / var) - 1) 
+  )
+}
+
+null.model.stats = data.frame(
+  mu = c(mean(cm.proportions.18Sv4), mean(cm.proportions.18Sv9)),
+  var = c(var(cm.proportions.18Sv4), var(cm.proportions.18Sv9)),
+  precision = c(
+    precision(
+      mean(cm.proportions.18Sv4),
+      var(cm.proportions.18Sv4)
+    ),
+    precision(
+      mean(cm.proportions.18Sv9),
+      var(cm.proportions.18Sv9)
+    )
+  ),
+  row.names = c("18Sv4", "18Sv9")
+)
+
+null.model.stats$shape1 <- c(
+  null.model.stats["18Sv4", "mu"] / null.model.stats["18Sv4", "precision"],
+  null.model.stats["18Sv9", "mu"] / null.model.stats["18Sv9", "precision"]
+)
+
+null.model.stats$shape2 <- c(
+  null.model.stats["18Sv4", "precision"] - null.model.stats["18Sv4", "shape1"],
+  null.model.stats["18Sv9", "precision"] - null.model.stats["18Sv9", "shape1"]
+)
+
+null.model.stats
+```
+18Sv9 set has so much less variance in proportions... more ASVs in table but less detection of CM species, or less success in identification/phylogeny classification?
+
+Bigger problem (?): if both shape parameters really are <1 (and this much less than 1), then we get a bimodal beta distribution... this wouldn't be happening if mu was larger
+or var was smaller.
+
+Not a great sign since zeroes will have highest (contribution to) likelihood throughout, probably exceeding the few nonzero points... even if there's a signal it will be slim,
+might even be non-significant on likelihood ratio or t test check.
+
+```{r plot.beta.18Sv4}
+null.model.plot <- function (dataset) {
+  x <- seq(0.01, 0.99, length.out = 99)
+  p1 <- ggplot() +
+    geom_line(aes(x = x, y = dbeta(x, 
+                                   null.model.stats[dataset, "shape1"],
+                                   null.model.stats[dataset, "shape2"]
+                                   )
+                  )
+              ) 
+  return(p1)
+}
+
+p2 <- ggplot(data.frame(col1 = cm.proportions.18Sv4,
+                                   row.names = names(cm.proportions.18Sv4)),
+             aes(x = col1)) +
+  geom_histogram(bins = 10)
+  
+null.model.plot("18Sv4") + p2
+```
+```{r plot.beta.18Sv9}
+p2 <- ggplot(data.frame(col1 = cm.proportions.18Sv9,
+                                   row.names = names(cm.proportions.18Sv9)),
+             aes(x = col1)) +
+  geom_histogram(bins = 10)
+
+null.model.plot("18Sv9") + p2
+```
+follow the vignette and set up a betareg model. just one. see what metrics are available, compare a few models.
+
+```{r}
+data.18Sv4 = data.frame(env.features.18Sv4, cm.proportions.18Sv4)
+lon.18Sv4 <- data.18Sv4[!is.na(data.18Sv4$Lon_Dec),
+                        c("Lon_Dec", "cm.proportions.18Sv4")]
+lon.18Sv4.model <- betareg(cm.proportions.18Sv4 ~ Lon_Dec, 
+                           lon.18Sv4, link = "logit")
+
+lat.18Sv4 <- data.18Sv4[!is.na(data.18Sv4$Lat_Dec),
+                        c("Lat_Dec", "cm.proportions.18Sv4")]
+lat.18Sv4.model <- betareg(cm.proportions.18Sv4 ~ Lat_Dec, 
+                           lat.18Sv4, link = "logit")
+
+bdepth.18Sv4 <- data.18Sv4[!is.na(data.18Sv4$Bottle_Depth),
+                        c("Bottle_Depth", "cm.proportions.18Sv4")]
+bdepth.18Sv4.model <- betareg(cm.proportions.18Sv4 ~ Bottle_Depth, 
+                           bdepth.18Sv4, link = "logit")
+
+temp.18Sv4 <- data.18Sv4[!is.na(data.18Sv4$T_degC),
+                        c("T_degC", "cm.proportions.18Sv4")]
+temp.18Sv4.model <- betareg(cm.proportions.18Sv4 ~ T_degC, 
+                           temp.18Sv4, link = "logit")
+
+sal.18Sv4 <- data.18Sv4[!is.na(data.18Sv4$Salnty),
+                        c("Salnty", "cm.proportions.18Sv4")]
+sal.18Sv4.model <- betareg(cm.proportions.18Sv4 ~ Salnty, 
+                           sal.18Sv4, link = "logit")
+
+```
+
+```{r}
+AIC(lon.18Sv4.model, lat.18Sv4.model, bdepth.18Sv4.model, temp.18Sv4.model,
+    sal.18Sv4.model)
+#plot(lon.18Sv4.model)
+```
+```{r}
+logLik(lat.18Sv4.model)
+logLik(lon.18Sv4.model)
+logLik(bdepth.18Sv4.model)
+```
+```{r}
+summary(temp.18Sv4.model)
+```
+
